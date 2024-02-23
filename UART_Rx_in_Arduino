@@ -1,0 +1,71 @@
+#include <avr/io.h>
+#include <avr/eeprom.h>
+#include <util/delay.h>
+
+#define BAUD_RATE 9600
+#define F_CPU 16000000UL
+#define EEPROM_START_ADDRESS 0
+#define MAX_STRING_LENGTH 64
+
+void USART_Init(unsigned int ubrr) {
+  UBRR0H = (unsigned char)(ubrr >> 8);
+  UBRR0L = (unsigned char)ubrr;
+  UCSR0B = (1 << RXEN0) | (1 << TXEN0);
+  UCSR0C = (3 << UCSZ00);
+}
+
+unsigned char USART_Receive() {
+  while (!(UCSR0A & (1 << RXC0)));
+  return UDR0;
+}
+
+void USART_Transmit(unsigned char data) {
+  while (!(UCSR0A & (1 << UDRE0)));
+  UDR0 = data;
+}
+
+void EEPROM_WriteString(uint16_t address, const char *str) {
+  while (*str != '\0' && address < EEPROM_START_ADDRESS + MAX_STRING_LENGTH) {
+    eeprom_write_byte((uint8_t *)address, *str);
+    address++;
+    str++;
+  }
+  // Null-terminate the string
+  eeprom_write_byte((uint8_t *)address, '\0');
+}
+
+void sendStringFromEEPROM(uint16_t address) {
+  char receivedString[MAX_STRING_LENGTH];
+  uint8_t i = 0;
+
+  while (1) {
+    char currentChar = eeprom_read_byte((uint8_t *)address);
+    if (currentChar == '\0' || i >= MAX_STRING_LENGTH) {
+      break;
+    }
+
+    receivedString[i++] = currentChar;
+    address++;
+  }
+
+  for (uint8_t j = 0; j < i; j++) {
+    USART_Transmit(receivedString[j]);
+  }
+}
+
+int main() {
+  USART_Init(F_CPU / (16 * BAUD_RATE) - 1);
+
+  while (1) {
+    char receivedByte = USART_Receive();
+
+    EEPROM_WriteString(EEPROM_START_ADDRESS, &receivedByte);
+
+    if (receivedByte == '\0') {
+      sendStringFromEEPROM(EEPROM_START_ADDRESS);
+      _delay_ms(10);
+    }
+  }
+  return 0;
+}
+
